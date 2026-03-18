@@ -851,14 +851,222 @@ Step 7: [COMPLETED] End-to-end verification
    │     + 35 tests pass (23 new + 12 existing), 0 regressions
 ```
 
-## NOT in Scope
+## Phase 2 Roadmap
+
+### 2A. Richer Tenant Model
+
+Current: 7 tenants with basic pricing (name, category, floor, rent, spend).
+Target: 20-30 tenants with full P&L modeling.
+
+New TenantConfig fields:
+```python
+@dataclass
+class TenantConfig:
+    # ... existing fields ...
+    # P&L model
+    gross_margin_pct: float = 0.0     # e.g. F&B ~60%, Fashion ~50%, Luxury ~70%
+    staff_count: int = 0               # headcount
+    avg_staff_cost: float = 0.0        # monthly per person
+    inventory_turnover_days: int = 0   # how fast stock rotates
+    min_viable_revenue: float = 0.0    # below this, tenant exits
+    # Lease terms
+    lease_start_date: str = ""
+    rent_free_months: int = 0          # incentive period
+    rent_escalation_pct: float = 0.0   # annual increase
+    break_clause_month: int = 0        # when tenant can exit early
+    deposit_months: int = 3
+    # Brand characteristics
+    brand_strength: float = 0.5        # 0-1, affects foot traffic draw
+    target_customer_age: str = ""      # e.g. "18-30"
+    online_presence_score: float = 0.0 # 0-1, affects social media buzz
+```
+
+Typical mall with 20+ tenants:
+- Floor 1: 5-6 tenants (high footfall: coffee, bakery, pharmacy, convenience, fast fashion)
+- Floor 2: 5-6 tenants (fashion, lifestyle, sports)
+- Floor 3: 4-5 tenants (F&B restaurants, family entertainment)
+- Floor 4: 3-4 tenants (cinema, gym, education, co-working)
+- B1: 2-3 tenants (supermarket, parking services)
+
+### 2B. Competitor Intelligence
+
+Current: CompetitorMall has name + distance + positioning (3 fields).
+Target: Full competitor analysis that affects agent behavior.
+
+```python
+@dataclass
+class CompetitorMall:
+    name: str
+    distance_km: float
+    positioning: str = "general"
+    # NEW
+    floors: int = 0
+    total_area_sqm: float = 0.0
+    anchor_tenants: list[str] = field(default_factory=list)
+    monthly_foot_traffic: int = 0       # estimated from public data
+    avg_rent_per_sqm: float = 0.0       # market benchmark
+    occupancy_rate: float = 0.0         # % of space leased
+    year_opened: int = 0
+    recent_renovations: str = ""
+    strengths: list[str] = field(default_factory=list)   # e.g. ["strong F&B", "cinema"]
+    weaknesses: list[str] = field(default_factory=list)  # e.g. ["poor parking", "dated"]
+```
+
+How competitors affect simulation:
+- Agent system prompt includes competitor context: "Joy City (2.5km away) has Zara, H&M,
+  and an IMAX cinema. It recently renovated. How does Sunrise Mall compare?"
+- Agents can express preference: "I'd rather go to Joy City for fashion"
+- Monte Carlo uses competitor occupancy rate as market benchmark for survival estimates
+- Rental prediction uses competitor avg_rent_per_sqm as pricing anchor
+
+### 2C. Richer Agent (Customer) Profiles
+
+Current: age, gender, income, MBTI, ring distance, budget.
+Target: Full consumer psychographic profile.
+
+```python
+@dataclass
+class ConsumerProfile:
+    # Demographics (existing)
+    age: int
+    gender: str
+    income_level: str
+    mbti: str
+    ring_radius_km: float
+    monthly_shopping_budget: int
+    # NEW: Lifestyle
+    household_size: int = 1              # single, couple, family
+    has_children: bool = False
+    children_ages: list[int] = field(default_factory=list)
+    car_owner: bool = False
+    # NEW: Shopping behavior
+    visit_frequency: str = "weekly"      # daily, weekly, monthly, rarely
+    preferred_categories: list[str] = field(default_factory=list)
+    price_sensitivity: float = 0.5       # 0=price insensitive, 1=very sensitive
+    brand_loyalty: float = 0.5           # 0=switches easily, 1=very loyal
+    social_media_activity: float = 0.5   # 0=lurker, 1=influencer
+    # NEW: Commute
+    primary_transport: str = "metro"     # metro, bus, car, walk, bike
+    max_commute_minutes: int = 30
+    # NEW: Competitor awareness
+    visits_competitor_malls: list[str] = field(default_factory=list)
+    competitor_satisfaction: dict[str, float] = field(default_factory=dict)
+```
+
+Impact on simulation:
+- Agents with children specifically look for kids entertainment, family restaurants
+- Car owners care about parking; metro users don't
+- High price_sensitivity agents complain more about expensive stores
+- High social_media_activity agents post more, driving viral potential
+- Competitor-aware agents make direct comparisons in their posts
+
+### 2D. Cap Rate Valuation Model
+
+Cap rate is the key metric for commercial real estate valuation:
+  Asset Value = Net Operating Income (NOI) / Cap Rate
+
+```
+VALUATION PIPELINE:
+┌─────────────────┐    ┌──────────────────┐    ┌───────────────────┐
+│ Gross Rental     │    │ Operating        │    │ Market Cap Rate   │
+│ Income (from MC) │───▶│ Expenses         │───▶│ (from comps)      │
+│ P10/P50/P90      │    │ - Management 5%  │    │ e.g. 5-8% for     │
+│                  │    │ - Maintenance 3% │    │ neighborhood mall  │
+│                  │    │ - Insurance 1%   │    │                   │
+│                  │    │ - Property tax   │    │                   │
+│                  │    │ - Vacancy reserve│    │                   │
+└─────────────────┘    └────────┬─────────┘    └─────────┬─────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌─────────────────┐      ┌───────────────┐
+                       │ NOI = Gross -    │      │ Asset Value = │
+                       │   Expenses       │─────▶│ NOI / CapRate │
+                       └─────────────────┘      └───────────────┘
+```
+
+New module: `oasis/social_platform/valuation.py`
+
+```python
+@dataclass
+class ValuationConfig:
+    management_fee_pct: float = 0.05      # % of gross income
+    maintenance_pct: float = 0.03
+    insurance_pct: float = 0.01
+    property_tax_pct: float = 0.012
+    vacancy_reserve_pct: float = 0.05     # already modeled by MC, but buffer
+    cap_rate: float = 0.065               # market cap rate for this area/type
+    cap_rate_range: tuple[float, float] = (0.05, 0.08)  # sensitivity range
+
+@dataclass
+class ValuationReport:
+    # From Monte Carlo
+    gross_income_annual_p50: float
+    gross_income_annual_p10: float
+    gross_income_annual_p90: float
+    # Expenses
+    total_expenses_pct: float
+    noi_annual_p50: float
+    noi_annual_p10: float
+    noi_annual_p90: float
+    # Valuation
+    asset_value_p50: float               # NOI_P50 / cap_rate
+    asset_value_p10: float               # NOI_P10 / high_cap_rate (conservative)
+    asset_value_p90: float               # NOI_P90 / low_cap_rate (optimistic)
+    # Investment analysis
+    acquisition_cost: float              # user input
+    value_add_cost: float                # renovation/refit cost
+    total_investment: float
+    projected_irr: float                 # internal rate of return
+    equity_multiple: float               # total return / equity invested
+    payback_years: float
+
+    # Scenario comparison
+    # Run for baseline and each fix → which fix maximizes asset value?
+```
+
+Example output:
+```
+VALUATION — SUNRISE MALL
+  Gross income (annual, P50):     ¥1,157,267
+  Operating expenses (15%):       ¥  173,590
+  NOI (P50):                      ¥  983,677
+  Cap rate:                       6.5%
+  ──────────────────────────────────────────
+  Asset value (P50):              ¥15,133,492
+  Asset value (P10, conservative):¥10,421,738
+  Asset value (P90, optimistic):  ¥22,847,200
+
+  INVESTMENT ANALYSIS
+  Acquisition cost:               ¥12,000,000
+  Renovation (Gucci→Zara fix):    ¥   500,000
+  Total investment:               ¥12,500,000
+  Post-fix asset value (P50):     ¥18,900,000
+  Value created:                  ¥ 6,400,000
+  Equity multiple:                1.51x
+  IRR (3yr hold):                 14.8%
+```
+
+### Implementation Order (Phase 2)
+
+```
+Step 2A: Richer tenants          [2 weeks]  — P&L fields, lease terms, 20+ tenant templates
+Step 2B: Competitor intelligence [1 week]   — enrich CompetitorMall, inject into agent context
+Step 2C: Customer profiles       [2 weeks]  — psychographics, transport, competitor awareness
+Step 2D: Cap rate valuation      [1 week]   — NOI calculation, asset value, IRR
+Step 2E: Integration tests       [1 week]   — end-to-end with all enrichments
+```
+
+Dependency: 2D depends on 2A (needs richer rental income data).
+2B and 2C can run in parallel.
+
+## NOT in Scope (deferred to Phase 3+)
 
 - Billing/pricing engine — validate simulation value first
-- Web dashboard or API — CLI + JSON export is sufficient for v1
+- Web dashboard or API — CLI + JSON export is sufficient for v1-v2
 - PDF/PPTX report generation — JSON is machine-readable, fund managers use Excel
-- Multi-mall competitive simulation — v1: single mall per run
-- Real geographic data integration (GIS, census) — manual input for v1
+- Real geographic data integration (GIS, census API) — manual input for now
 - Agent movement/foot traffic physics — social simulation only
-- Ad fatigue / repeated exposure decay modeling
-- Viral cascade visualization
-- Building layout / floor plan spatial simulation
+- Time-series simulation (monthly tenant churn over 36 months)
+- Debt modeling (LTV, DSCR, mortgage payments)
+- Multi-asset portfolio optimization
+- Real-time market data feeds (rent comps, transaction data)
