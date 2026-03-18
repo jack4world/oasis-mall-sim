@@ -57,6 +57,8 @@ class SocialAction:
                 self.send_to_group,
                 self.create_group,
                 self.listen_from_group,
+                self.visit_store,
+                self.write_review,
             ]
         ]
 
@@ -756,3 +758,29 @@ class SocialAction:
         r"""Listen messages from groups"""
         return await self.perform_action(self.agent_id,
                                          ActionType.LISTEN_FROM_GROUP.value)
+
+    async def visit_store(self, store_name: str):
+        r"""Visit a store in the mall.
+
+        Args:
+            store_name (str): The name of the store to visit.
+
+        Returns:
+            str: The result of the visit.
+        """
+        return await self.perform_action((store_name, ),
+                                         ActionType.VISIT_STORE.value)
+
+    async def write_review(self, store_name: str, content: str):
+        r"""Write a review about a store you visited. This creates a
+        public post with your review.
+
+        Args:
+            store_name (str): The name of the store.
+            content (str): Your review text.
+
+        Returns:
+            str: The result of posting the review.
+        """
+        return await self.perform_action((store_name, content),
+                                         ActionType.WRITE_REVIEW.value)

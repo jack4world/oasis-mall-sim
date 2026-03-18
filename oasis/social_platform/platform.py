@@ -255,6 +255,83 @@ class Platform:
         # except Exception as e:
         #     return {"success": False, "error": str(e)}
 
+    async def register_store(self, store_name: str, category: str,
+                             floor: int, brand_tier: str,
+                             avg_spend_per_visit: float = 0.0,
+                             monthly_rent: float = 0.0,
+                             area_sqm: float = 0.0):
+        try:
+            insert_q = (
+                "INSERT INTO store (store_name, category, floor, brand_tier, "
+                "avg_spend_per_visit, monthly_rent, area_sqm) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)")
+            self.pl_utils._execute_db_command(
+                insert_q, (store_name, category, floor, brand_tier,
+                           avg_spend_per_visit, monthly_rent, area_sqm),
+                commit=True)
+            return {"success": True, "store_name": store_name}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def visit_store(self, agent_id, visit_message):
+        (store_name, ) = visit_message
+        if self.recsys_type == RecsysType.REDDIT:
+            current_time = self.sandbox_clock.time_transfer(
+                datetime.now(), self.start_time)
+        else:
+            current_time = self.sandbox_clock.get_time_step()
+
+        user_id = agent_id
+        store_check = "SELECT store_id FROM store WHERE store_name = ?"
+        self.pl_utils._execute_db_command(store_check, (store_name, ))
+        store_row = self.db_cursor.fetchone()
+        if not store_row:
+            return {
+                "success": False,
+                "error": f"Store '{store_name}' not found."
+            }
+
+        store_id = store_row[0]
+        visit_insert = (
+            "INSERT INTO visit (user_id, store_id, created_at) "
+            "VALUES (?, ?, ?)")
+        self.pl_utils._execute_db_command(visit_insert,
+                                          (user_id, store_id, current_time),
+                                          commit=True)
+
+        action_info = {"store_name": store_name, "store_id": store_id}
+        self.pl_utils._record_trace(user_id, ActionType.VISIT_STORE.value,
+                                    action_info, current_time)
+        return {"success": True, "store_name": store_name}
+
+    async def write_review(self, agent_id, review_message):
+        store_name, content = review_message
+        if self.recsys_type == RecsysType.REDDIT:
+            current_time = self.sandbox_clock.time_transfer(
+                datetime.now(), self.start_time)
+        else:
+            current_time = self.sandbox_clock.get_time_step()
+
+        user_id = agent_id
+        review_content = f"[Review: {store_name}] {content}"
+        post_insert = (
+            "INSERT INTO post (user_id, content, created_at) "
+            "VALUES (?, ?, ?)")
+        self.pl_utils._execute_db_command(post_insert,
+                                          (user_id, review_content,
+                                           current_time),
+                                          commit=True)
+        post_id = self.db_cursor.lastrowid
+
+        action_info = {
+            "store_name": store_name,
+            "content": content,
+            "post_id": post_id,
+        }
+        self.pl_utils._record_trace(user_id, ActionType.WRITE_REVIEW.value,
+                                    action_info, current_time)
+        return {"success": True, "post_id": post_id}
+
     async def refresh(self, agent_id: int):
         # Retrieve posts for a specific id from the rec table
         if self.recsys_type == RecsysType.REDDIT:

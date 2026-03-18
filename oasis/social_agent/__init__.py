@@ -16,8 +16,10 @@ from .agent_graph import AgentGraph
 from .agents_generator import (generate_agents_100w,
                                generate_reddit_agent_graph,
                                generate_twitter_agent_graph)
+from .mall_agents_generator import generate_mall_agent_graph
 
 __all__ = [
     "SocialAgent", "AgentGraph", "generate_agents_100w",
-    "generate_reddit_agent_graph", "generate_twitter_agent_graph"
+    "generate_reddit_agent_graph", "generate_twitter_agent_graph",
+    "generate_mall_agent_graph",
 ]

@@ -38,6 +38,8 @@ PRODUCT_SCHEMA_SQL = "product.sql"
 GROUP_SCHEMA_SQL = "chat_group.sql"
 GROUP_MEMBER_SCHEMA_SQL = "group_member.sql"
 GROUP_MESSAGE_SCHEMA_SQL = "group_message.sql"
+STORE_SCHEMA_SQL = "store.sql"
+VISIT_SCHEMA_SQL = "visit.sql"
 
 TABLE_NAMES = {
     "user",
@@ -191,6 +193,18 @@ def create_db(db_path: str | None = None):
         with open(group_message_sql_path, "r") as sql_file:
             group_message_sql_script = sql_file.read()
         cursor.executescript(group_message_sql_script)
+
+        # Read and execute the store table SQL script:
+        store_sql_path = osp.join(schema_dir, STORE_SCHEMA_SQL)
+        with open(store_sql_path, "r") as sql_file:
+            store_sql_script = sql_file.read()
+        cursor.executescript(store_sql_script)
+
+        # Read and execute the visit table SQL script:
+        visit_sql_path = osp.join(schema_dir, VISIT_SCHEMA_SQL)
+        with open(visit_sql_path, "r") as sql_file:
+            visit_sql_script = sql_file.read()
+        cursor.executescript(visit_sql_script)
 
         # Commit the changes:
         conn.commit()

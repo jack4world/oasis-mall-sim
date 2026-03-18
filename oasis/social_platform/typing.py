@@ -47,6 +47,8 @@ class ActionType(Enum):
     SEND_TO_GROUP = "send_to_group"
     CREATE_GROUP = "create_group"
     LISTEN_FROM_GROUP = "listen_from_group"
+    VISIT_STORE = "visit_store"
+    WRITE_REVIEW = "write_review"
 
     @classmethod
     def get_default_twitter_actions(cls):

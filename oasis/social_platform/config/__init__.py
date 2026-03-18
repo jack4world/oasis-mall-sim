@@ -11,10 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =========== Copyright 2023 @ CAMEL-AI.org. All Rights Reserved. ===========
+from .mall import (BuildingConfig, CompetitorMall, LocationRing, MallConfig,
+                   TenantConfig, TransportConfig)
 from .neo4j import Neo4jConfig
 from .user import UserInfo
 
 __all__ = [
     "UserInfo",
     "Neo4jConfig",
+    "MallConfig",
+    "BuildingConfig",
+    "TenantConfig",
+    "TransportConfig",
+    "LocationRing",
+    "CompetitorMall",
 ]
