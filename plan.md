@@ -1046,26 +1046,142 @@ VALUATION — SUNRISE MALL
   IRR (3yr hold):                 14.8%
 ```
 
-### Implementation Order (Phase 2)
+### 2E. Monte Carlo Optimization Engine — Find the Best Fix Automatically
+
+Current approach: investor manually defines 3-4 fix scenarios, MC evaluates each.
+Target: **MC automatically searches hundreds of tenant combinations and finds the
+one that maximizes asset value.**
 
 ```
-Step 2A: Richer tenants          [2 weeks]  — P&L fields, lease terms, 20+ tenant templates
-Step 2B: Competitor intelligence [1 week]   — enrich CompetitorMall, inject into agent context
-Step 2C: Customer profiles       [2 weeks]  — psychographics, transport, competitor awareness
-Step 2D: Cap rate valuation      [1 week]   — NOI calculation, asset value, IRR
-Step 2E: Integration tests       [1 week]   — end-to-end with all enrichments
+OPTIMIZATION PIPELINE:
+┌─────────────────────────────────────────────────────────────────────┐
+│  1. TENANT CANDIDATE POOL                                          │
+│     A library of ~50 possible tenants (brand, category, tier,      │
+│     rent, spend, area) that could fit in this mall.                │
+│     Sourced from: market data, competitor analysis, broker lists.  │
+│                                                                    │
+│  2. SLOT DEFINITION                                                │
+│     Which spaces are "fixable"? The investor marks slots:          │
+│     - Slot A: Floor 2, 150m², currently Gucci (REPLACE)           │
+│     - Slot B: Floor 1, 40m², currently Luckin (OPTIONAL)          │
+│     - Other tenants: KEEP (not part of optimization)              │
+│                                                                    │
+│  3. COMBINATION GENERATOR                                          │
+│     For each fixable slot, try every candidate that fits:          │
+│     - Category constraints (Floor 1 = F&B/Retail only)            │
+│     - Size constraints (candidate area ≤ slot area)               │
+│     - No duplicate brands (can't have 2 Starbucks)                │
+│     → Generates N valid combinations (typically 100-500)           │
+│                                                                    │
+│  4. MC EVALUATION (per combination)                                │
+│     For each combination, run 1000 MC iterations with:             │
+│     - Randomized agent demographics (age ±5yr, income ±20%)       │
+│     - Randomized visit behavior (frequency ±30%)                  │
+│     - Randomized price sensitivity (±25%)                         │
+│     - Randomized competitor pull (±20%)                           │
+│     → Produces: expected 3yr NOI (P10/P50/P90), tenant survival   │
+│                                                                    │
+│  5. RANK BY EXPECTED ASSET VALUE                                   │
+│     Asset Value = NOI / Cap Rate                                   │
+│     Rank all combinations by P50 asset value                      │
+│     → Top 10 combinations with confidence intervals               │
+│                                                                    │
+│  6. VALIDATE TOP 3 WITH LLM AGENTS                                │
+│     Run full OASIS simulation on top 3 combinations only          │
+│     → Qualitative validation: do agents like this mix?            │
+│     → Final recommendation with both signals                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-Dependency: 2D depends on 2A (needs richer rental income data).
-2B and 2C can run in parallel.
+Key design: MC models **agent behavior variation**, not just financial noise:
 
-## NOT in Scope (deferred to Phase 3+)
+```python
+# Per-iteration, each simulated "agent segment" has randomized behavior:
+@dataclass
+class AgentSegmentSample:
+    # Demographics (from LocationRing, with noise)
+    population: int              # ring.population × uniform(0.8, 1.2)
+    avg_income_rank: float       # ring income ± noise
+    price_sensitivity: float     # uniform(0.3, 0.9) — how much price matters
 
-- Billing/pricing engine — validate simulation value first
-- Web dashboard or API — CLI + JSON export is sufficient for v1-v2
-- PDF/PPTX report generation — JSON is machine-readable, fund managers use Excel
-- Real geographic data integration (GIS, census API) — manual input for now
-- Agent movement/foot traffic physics — social simulation only
+    # Visit behavior (randomized per iteration)
+    mall_visit_frequency: float  # visits/month, from transport model ± 30%
+    store_enter_rate: float      # base enter rate × uniform(0.7, 1.3)
+    purchase_rate: float         # base purchase rate × uniform(0.8, 1.2)
+
+    # Competitor diversion
+    competitor_pull: float       # 0-1, what % of visits go to competitor instead
+    competitor_overlap: list[str] # categories where competitor is stronger
+```
+
+This means the Monte Carlo captures real consumer uncertainty:
+- "What if 30% fewer families visit because a new competitor opens?"
+- "What if students are more price-sensitive than we assumed?"
+- "What if the cinema draws less traffic than expected?"
+
+Output to investor:
+```
+TOP 5 TENANT COMBINATIONS (ranked by expected 3yr asset value):
+
+  #1: Replace Gucci → Nike, Keep Luckin
+      3yr NOI P50: ¥2.8M  |  Asset Value: ¥43M  |  Refit: ¥400K
+      P(beats baseline): 98.2%  |  Expected uplift: +¥6.2M
+
+  #2: Replace Gucci → Zara, Replace Luckin → Manner Coffee
+      3yr NOI P50: ¥2.6M  |  Asset Value: ¥40M  |  Refit: ¥600K
+      P(beats baseline): 95.7%  |  Expected uplift: +¥4.8M
+
+  #3: Replace Gucci → Adidas, Keep Luckin
+      3yr NOI P50: ¥2.5M  |  Asset Value: ¥38M  |  Refit: ¥350K
+      P(beats baseline): 94.1%  |  Expected uplift: +¥4.1M
+  ...
+```
+
+### Implementation Order (Phase 2) — REVISED
+
+Priority: ship the product differentiator first, accuracy later.
+
+```
+Step 2E: MC Optimization Engine  [2 weeks]  — THE core feature
+   │     tenant_pool.py: ~30 real Chinese retail brands with real pricing
+   │     optimizer.py: combination generator + MC evaluator + ranker
+   │     Uses existing MallConfig + monte_carlo.py
+   │     Output: "Top 5 tenant fixes ranked by expected asset value"
+   │
+Step 2D: Cap Rate Valuation      [1 week]  — speaks fund manager language
+   │     valuation.py: NOI = gross - expenses, asset value = NOI / cap rate
+   │     Plugs into optimizer ranking (rank by asset value, not raw rent)
+   │     Adds IRR and equity multiple to final report
+   │
+Step 2A: Tenant Pool (simplified) [3 days] — real brands, not richer schema
+   │     NOT adding 15 new dataclass fields
+   │     Instead: JSON file with ~30 real Chinese retail brands
+   │     (Starbucks, Luckin, Heytea, Uniqlo, Zara, UR, Nike, Haidilao, etc.)
+   │     Each brand: name, category, tier, avg_spend, typical_rent, typical_area
+   │     The optimizer draws candidates from this pool
+   │
+Step 2F: Tests + polish           [2 days] — verify end-to-end
+```
+
+Dependency: 2E uses existing monte_carlo.py. 2D plugs into 2E's ranking.
+2A feeds 2E's candidate pool. Total: ~3 weeks.
+
+```
+  2A (tenant pool JSON, 3 days)
+   │
+   └──→ 2E (optimizer, 2 weeks) ──→ 2D (cap rate, 1 week) ──→ 2F (tests)
+```
+
+## Deferred to Phase 3
+
+- 2B: Competitor intelligence — competitors already in agent context, enrich later
+- 2C: Customer psychographics — current age/income/MBTI is sufficient for v2
+- Richer TenantConfig fields (gross_margin, staff_count, lease terms) — only add when
+  a real investor says "I need this field"
+- Billing/pricing engine
+- Web dashboard or API
+- PDF/PPTX report generation
+- Real geographic data integration (GIS, census API)
 - Time-series simulation (monthly tenant churn over 36 months)
 - Debt modeling (LTV, DSCR, mortgage payments)
 - Multi-asset portfolio optimization
